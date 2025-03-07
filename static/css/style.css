@@ -1,0 +1,203 @@
+/* 전체 스타일 */
+body {
+    background-color: #f8f9fa;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+/* 네비게이션 바 */
+.navbar {
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* 카드 스타일 */
+.card {
+    border: none;
+    border-radius: 10px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+    margin-bottom: 20px;
+}
+
+.card-header {
+    background-color: #fff;
+    border-bottom: 1px solid #eee;
+    font-weight: 600;
+}
+
+/* 테이블 스타일 */
+.table {
+    margin-bottom: 0;
+}
+
+.table th {
+    font-weight: 600;
+    color: #495057;
+    background-color: #f8f9fa;
+    border-top: none;
+}
+
+.table td {
+    vertical-align: middle;
+}
+
+/* 상태 표시 */
+.status-indicator {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 5px;
+}
+
+.status-online {
+    background-color: #28a745;
+}
+
+.status-offline {
+    background-color: #dc3545;
+}
+
+.status-warning {
+    background-color: #ffc107;
+}
+
+/* 토너 레벨 표시 */
+.toner-bar {
+    height: 20px;
+    border-radius: 4px;
+    margin-bottom: 5px;
+    background-color: #e9ecef;
+    overflow: hidden;
+}
+
+.toner-level {
+    height: 100%;
+    text-align: center;
+    color: white;
+    font-size: 12px;
+    line-height: 20px;
+    font-weight: bold;
+    transition: width 0.3s ease;
+}
+
+.toner-black {
+    background-color: #343a40;
+}
+
+.toner-cyan {
+    background-color: #17a2b8;
+}
+
+.toner-magenta {
+    background-color: #e83e8c;
+}
+
+.toner-yellow {
+    background-color: #ffc107;
+    color: #343a40;
+}
+
+/* 토너 레벨 경고 */
+.toner-warning {
+    background-color: #ffc107;
+}
+
+.toner-danger {
+    background-color: #dc3545;
+}
+
+/* 모달 스타일 */
+.modal-header {
+    background-color: #f8f9fa;
+    border-bottom: 1px solid #eee;
+}
+
+.modal-footer {
+    background-color: #f8f9fa;
+    border-top: 1px solid #eee;
+}
+
+/* 장치 상세 정보 */
+.device-info {
+    margin-bottom: 20px;
+}
+
+.device-info h5 {
+    margin-bottom: 15px;
+    color: #495057;
+    font-weight: 600;
+}
+
+.info-item {
+    margin-bottom: 10px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #eee;
+}
+
+.info-label {
+    font-weight: 600;
+    color: #6c757d;
+}
+
+/* 차트 컨테이너 */
+.chart-container {
+    position: relative;
+    height: 200px;
+    margin-bottom: 20px;
+}
+
+/* 반응형 조정 */
+@media (max-width: 768px) {
+    .table-responsive {
+        overflow-x: auto;
+    }
+    
+    .card-body {
+        padding: 15px;
+    }
+}
+
+/* 애니메이션 효과 */
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.fade-in {
+    animation: fadeIn 0.5s ease-in-out;
+}
+
+/* 클릭 가능한 행 */
+.clickable-row {
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.clickable-row:hover {
+    background-color: rgba(0, 123, 255, 0.05);
+}
+
+/* 로딩 스피너 */
+.spinner-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 200px;
+    flex-direction: column;
+}
+
+/* 페이지네이션 */
+.pagination {
+    justify-content: center;
+    margin-top: 20px;
+}
+
+/* 버튼 스타일 */
+.btn-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.btn-icon i {
+    margin-right: 5px;
+} 
