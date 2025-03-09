@@ -1,12 +1,8 @@
 // 전역 변수
 let devices = [];
-let autoScanInterval = null;
 let settings = {
-    networkRange: '192.168.0.0/24',
-    scanInterval: 300,
     snmpCommunity: 'public',
-    snmpVersion: 2,
-    autoScan: true
+    snmpVersion: 2
 };
 
 // DOM이 로드된 후 실행
@@ -15,24 +11,22 @@ document.addEventListener('DOMContentLoaded', function() {
     loadSettings();
     
     // 이벤트 리스너 등록
-    document.getElementById('scan-btn').addEventListener('click', startScan);
-    document.getElementById('refresh-btn').addEventListener('click', startScan);
+    document.getElementById('scan-btn').addEventListener('click', scanDevice);
+    document.getElementById('refresh-btn').addEventListener('click', refreshDevices);
     document.getElementById('save-settings').addEventListener('click', saveSettings);
     document.getElementById('export-btn').addEventListener('click', exportToExcel);
     document.getElementById('search-input').addEventListener('input', filterDevices);
-    document.getElementById('location-filter').addEventListener('input', filterDevices);
-    document.getElementById('ip-filter').addEventListener('input', filterDevices);
-    document.getElementById('toner-filter').addEventListener('change', filterDevices);
-    document.getElementById('show-offline').addEventListener('change', filterDevices);
-    document.getElementById('show-warning').addEventListener('change', filterDevices);
     
-    // 자동 스캔 시작
-    if (settings.autoScan) {
-        startAutoScan();
-    }
+    // IP 주소 입력 필드에서 Enter 키 이벤트 처리
+    document.getElementById('ip-address-input').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            scanDevice();
+        }
+    });
     
-    // 초기 스캔 시작
-    startScan();
+    // 초기 장치 목록 로드
+    loadDevices();
 });
 
 // 설정 로드
@@ -43,70 +37,62 @@ function loadSettings() {
     }
     
     // 설정 폼에 값 설정
-    document.getElementById('network-range').value = settings.networkRange;
-    document.getElementById('scan-interval').value = settings.scanInterval;
     document.getElementById('snmp-community').value = settings.snmpCommunity;
     document.getElementById('snmp-version').value = settings.snmpVersion;
-    document.getElementById('auto-scan').checked = settings.autoScan;
 }
 
 // 설정 저장
 function saveSettings() {
     // 폼에서 값 가져오기
-    settings.networkRange = document.getElementById('network-range').value;
-    settings.scanInterval = parseInt(document.getElementById('scan-interval').value);
     settings.snmpCommunity = document.getElementById('snmp-community').value;
     settings.snmpVersion = parseInt(document.getElementById('snmp-version').value);
-    settings.autoScan = document.getElementById('auto-scan').checked;
     
     // 로컬 스토리지에 저장
     localStorage.setItem('printerScannerSettings', JSON.stringify(settings));
-    
-    // 자동 스캔 설정 업데이트
-    if (settings.autoScan) {
-        startAutoScan();
-    } else {
-        stopAutoScan();
-    }
     
     // 모달 닫기
     const modal = bootstrap.Modal.getInstance(document.getElementById('settingsModal'));
     modal.hide();
     
-    // 스캔 시작
-    startScan();
+    // 성공 메시지 표시
+    showSuccess('설정이 저장되었습니다.');
 }
 
-// 자동 스캔 시작
-function startAutoScan() {
-    // 기존 인터벌 정리
-    stopAutoScan();
+// 장치 목록 로드
+function loadDevices() {
+    fetch('/api/devices')
+        .then(response => response.json())
+        .then(data => {
+            devices = data.devices;
+            displayDevices(devices);
+        })
+        .catch(error => {
+            console.error('장치 목록 로드 오류:', error);
+            showError('장치 목록을 불러오는 중 오류가 발생했습니다.');
+        });
+}
+
+// 장치 목록 새로고침
+function refreshDevices() {
+    loadDevices();
+    showInfo('장치 목록을 새로고침했습니다.');
+}
+
+// 단일 장치 스캔
+function scanDevice() {
+    // IP 주소 가져오기
+    const ipAddress = document.getElementById('ip-address-input').value.trim();
     
-    // 새 인터벌 설정
-    autoScanInterval = setInterval(startScan, settings.scanInterval * 1000);
-}
-
-// 자동 스캔 중지
-function stopAutoScan() {
-    if (autoScanInterval) {
-        clearInterval(autoScanInterval);
-        autoScanInterval = null;
+    if (!ipAddress) {
+        showError('IP 주소를 입력해주세요.');
+        return;
     }
-}
-
-// 스캔 시작
-function startScan() {
-    // 로딩 표시
-    document.getElementById('devices-list').innerHTML = `
-        <tr>
-            <td colspan="8" class="text-center py-5">
-                <div class="spinner-border text-primary" role="status">
-                    <span class="visually-hidden">로딩 중...</span>
-                </div>
-                <p class="mt-2">장치를 스캔하는 중입니다...</p>
-            </td>
-        </tr>
-    `;
+    
+    // IP 주소 유효성 검사
+    if (!isValidIpAddress(ipAddress)) {
+        showError('유효한 IP 주소를 입력해주세요. (예: 192.168.0.100)');
+        return;
+    }
     
     // 스캔 버튼 비활성화
     const scanBtn = document.getElementById('scan-btn');
@@ -120,15 +106,22 @@ function startScan() {
             'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-            network_range: settings.networkRange
+            ip_address: ipAddress
         })
     })
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            devices = data.devices;
-            displayDevices(devices);
+            // 장치 목록 새로고침
+            loadDevices();
+            
+            // 성공 메시지 표시
+            showSuccess(data.message);
+            
+            // IP 주소 입력 필드 초기화
+            document.getElementById('ip-address-input').value = '';
         } else {
+            // 오류 메시지 표시
             showError(data.message);
         }
     })
@@ -138,21 +131,38 @@ function startScan() {
     .finally(() => {
         // 스캔 버튼 활성화
         scanBtn.disabled = false;
-        scanBtn.innerHTML = '<i class="bi bi-search me-1"></i>스캔 시작';
+        scanBtn.innerHTML = '<i class="bi bi-search me-1"></i>스캔';
     });
+}
+
+// IP 주소 유효성 검사
+function isValidIpAddress(ipAddress) {
+    const ipPattern = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+    if (!ipPattern.test(ipAddress)) {
+        return false;
+    }
+    
+    const parts = ipAddress.split('.');
+    for (let i = 0; i < 4; i++) {
+        const part = parseInt(parts[i]);
+        if (part < 0 || part > 255) {
+            return false;
+        }
+    }
+    
+    return true;
 }
 
 // 장치 목록 표시
 function displayDevices(devicesList) {
     const tbody = document.getElementById('devices-list');
     
-    // 장치가 없는 경우
-    if (devicesList.length === 0) {
+    // 데이터가 없으면 비어있는 메시지 표시
+    if (!devicesList || devicesList.length === 0) {
         tbody.innerHTML = `
             <tr>
                 <td colspan="8" class="text-center py-5">
-                    <i class="bi bi-exclamation-circle text-muted" style="font-size: 2rem;"></i>
-                    <p class="mt-2">발견된 장치가 없습니다.</p>
+                    <p class="mb-0">등록된 복사기가 없습니다. IP 주소를 입력하고 스캔 버튼을 클릭하세요.</p>
                 </td>
             </tr>
         `;
@@ -166,10 +176,10 @@ function displayDevices(devicesList) {
         let statusClass = 'status-online';
         let statusText = '온라인';
         
-        if (device.status.toLowerCase() === 'offline') {
+        if (device.status && device.status.toLowerCase() === 'offline') {
             statusClass = 'status-offline';
             statusText = '오프라인';
-        } else if (device.status.toLowerCase() === 'warning') {
+        } else if (device.status && device.status.toLowerCase() === 'warning') {
             statusClass = 'status-warning';
             statusText = '경고';
         }
@@ -185,12 +195,19 @@ function displayDevices(devicesList) {
                     ${statusText}
                 </td>
                 <td>${index + 1}</td>
-                <td>${device.name}</td>
-                <td>${device.model}</td>
-                <td>${device.serial}</td>
+                <td>${device.name || '알 수 없음'}</td>
+                <td>${device.model || '알 수 없음'}</td>
+                <td>${device.serial || '알 수 없음'}</td>
                 <td>${device.ip}</td>
                 <td>${tonerHtml}</td>
-                <td>${device.page_count.toLocaleString()}</td>
+                <td>
+                    <button class="btn btn-sm btn-outline-primary me-1 view-device" data-ip="${device.ip}" title="상세 정보">
+                        <i class="bi bi-info-circle"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-danger delete-device" data-ip="${device.ip}" title="삭제">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </td>
             </tr>
         `;
     });
@@ -199,10 +216,60 @@ function displayDevices(devicesList) {
     
     // 행 클릭 이벤트 등록
     document.querySelectorAll('.clickable-row').forEach(row => {
-        row.addEventListener('click', function() {
+        row.addEventListener('click', function(e) {
+            // 버튼 클릭은 무시
+            if (e.target.closest('button')) {
+                return;
+            }
+            
             const ip = this.getAttribute('data-ip');
             showDeviceDetails(ip);
         });
+    });
+    
+    // 상세 정보 버튼 이벤트 등록
+    document.querySelectorAll('.view-device').forEach(btn => {
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const ip = this.getAttribute('data-ip');
+            showDeviceDetails(ip);
+        });
+    });
+    
+    // 삭제 버튼 이벤트 등록
+    document.querySelectorAll('.delete-device').forEach(btn => {
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const ip = this.getAttribute('data-ip');
+            const device = devices.find(d => d.ip === ip);
+            
+            if (confirm(`정말로 "${device.name || device.ip}" 장치를 삭제하시겠습니까?`)) {
+                deleteDevice(ip);
+            }
+        });
+    });
+}
+
+// 장치 삭제
+function deleteDevice(ip) {
+    fetch(`/api/device/${ip}`, {
+        method: 'DELETE'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // 장치 목록 새로고침
+            loadDevices();
+            
+            // 성공 메시지 표시
+            showSuccess(data.message);
+        } else {
+            // 오류 메시지 표시
+            showError(data.message);
+        }
+    })
+    .catch(error => {
+        showError('장치 삭제 중 오류가 발생했습니다: ' + error.message);
     });
 }
 
@@ -470,11 +537,6 @@ function displayDeviceDetails(device) {
 // 장치 필터링
 function filterDevices() {
     const searchTerm = document.getElementById('search-input').value.toLowerCase();
-    const locationFilter = document.getElementById('location-filter').value.toLowerCase();
-    const ipFilter = document.getElementById('ip-filter').value.toLowerCase();
-    const tonerFilter = document.getElementById('toner-filter').value;
-    const showOffline = document.getElementById('show-offline').checked;
-    const showWarning = document.getElementById('show-warning').checked;
     
     // 필터링된 장치 목록
     const filteredDevices = devices.filter(device => {
@@ -483,38 +545,6 @@ function filterDevices() {
             !device.model.toLowerCase().includes(searchTerm) && 
             !device.ip.toLowerCase().includes(searchTerm)) {
             return false;
-        }
-        
-        // 위치 필터
-        if (locationFilter && !device.name.toLowerCase().includes(locationFilter)) {
-            return false;
-        }
-        
-        // IP 필터
-        if (ipFilter && !device.ip.toLowerCase().includes(ipFilter)) {
-            return false;
-        }
-        
-        // 상태 필터
-        if (!showOffline && device.status.toLowerCase() === 'offline') {
-            return false;
-        }
-        
-        if (!showWarning && device.status.toLowerCase() === 'warning') {
-            return false;
-        }
-        
-        // 토너 필터
-        if (tonerFilter) {
-            const blackPercent = device.toner.black.percent;
-            
-            if (tonerFilter === 'low' && blackPercent > 20) {
-                return false;
-            } else if (tonerFilter === 'medium' && (blackPercent <= 20 || blackPercent > 50)) {
-                return false;
-            } else if (tonerFilter === 'high' && blackPercent <= 50) {
-                return false;
-            }
         }
         
         return true;
@@ -568,17 +598,59 @@ function exportToExcel() {
     document.body.removeChild(link);
 }
 
-// 오류 표시
+// 오류 메시지 표시
 function showError(message) {
-    const tbody = document.getElementById('devices-list');
-    tbody.innerHTML = `
-        <tr>
-            <td colspan="8" class="text-center py-5">
-                <div class="alert alert-danger">
-                    <i class="bi bi-exclamation-triangle-fill me-2"></i>
-                    ${message}
-                </div>
-            </td>
-        </tr>
+    const alertDiv = document.createElement('div');
+    alertDiv.className = 'alert alert-danger alert-dismissible fade show';
+    alertDiv.innerHTML = `
+        <i class="bi bi-exclamation-triangle-fill me-2"></i>${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
     `;
+    
+    const container = document.querySelector('.container');
+    container.insertBefore(alertDiv, container.firstChild);
+    
+    // 8초 후 자동으로 닫기
+    setTimeout(() => {
+        alertDiv.classList.remove('show');
+        setTimeout(() => alertDiv.remove(), 300);
+    }, 8000);
+}
+
+// 성공 메시지 표시
+function showSuccess(message) {
+    const alertDiv = document.createElement('div');
+    alertDiv.className = 'alert alert-success alert-dismissible fade show';
+    alertDiv.innerHTML = `
+        <i class="bi bi-check-circle-fill me-2"></i>${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    `;
+    
+    const container = document.querySelector('.container');
+    container.insertBefore(alertDiv, container.firstChild);
+    
+    // 5초 후 자동으로 닫기
+    setTimeout(() => {
+        alertDiv.classList.remove('show');
+        setTimeout(() => alertDiv.remove(), 300);
+    }, 5000);
+}
+
+// 정보 메시지 표시
+function showInfo(message) {
+    const alertDiv = document.createElement('div');
+    alertDiv.className = 'alert alert-info alert-dismissible fade show';
+    alertDiv.innerHTML = `
+        <i class="bi bi-info-circle-fill me-2"></i>${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    `;
+    
+    const container = document.querySelector('.container');
+    container.insertBefore(alertDiv, container.firstChild);
+    
+    // 5초 후 자동으로 닫기
+    setTimeout(() => {
+        alertDiv.classList.remove('show');
+        setTimeout(() => alertDiv.remove(), 300);
+    }, 5000);
 } 

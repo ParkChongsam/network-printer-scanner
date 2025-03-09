@@ -1,25 +1,19 @@
 import os
-import nmap
 import time
 import socket
 import requests
 from datetime import datetime
-from pysnmp.hlapi import *
+import puresnmp
 
 class NetworkScanner:
     """네트워크 스캐너 클래스"""
     
-    def __init__(self, network_range='192.168.0.0/24'):
+    def __init__(self):
         """
         네트워크 스캐너 초기화
-        
-        Args:
-            network_range (str): 스캔할 네트워크 범위 (CIDR 표기법)
         """
-        self.network_range = network_range
         self.snmp_community = os.getenv('SNMP_COMMUNITY', 'public')
         self.snmp_version = int(os.getenv('SNMP_VERSION', 2))
-        self.nm = nmap.PortScanner()
         
         # 프린터/복사기 관련 포트
         self.printer_ports = [
@@ -67,30 +61,37 @@ class NetworkScanner:
             'page_counter': '1.3.6.1.2.1.43.10.2.1.4.1.1'
         }
     
-    def scan(self):
+    def scan(self, ip_address):
         """
-        네트워크 스캔 실행
+        단일 IP 주소 스캔 실행
         
+        Args:
+            ip_address (str): 스캔할 IP 주소
+            
         Returns:
-            list: 발견된 프린터/복사기 장치 목록
+            dict: 발견된 프린터/복사기 장치 정보 (장치가 없으면 None)
         """
-        print(f"네트워크 범위 {self.network_range} 스캔 중...")
+        print(f"IP 주소 {ip_address} 스캔 시작...")
         
-        # 프린터 관련 포트 스캔
-        port_list = ','.join(map(str, self.printer_ports))
-        self.nm.scan(hosts=self.network_range, arguments=f'-p {port_list} --open')
-        
-        devices = []
-        
-        # 스캔 결과 처리
-        for host in self.nm.all_hosts():
-            # 장치가 프린터/복사기인지 확인
-            if self._is_printer(host):
-                device_info = self._get_basic_device_info(host)
-                devices.append(device_info)
-        
-        print(f"{len(devices)}개의 프린터/복사기 장치를 발견했습니다.")
-        return devices
+        try:
+            # IP 주소가 유효한지 확인
+            socket.inet_aton(ip_address)
+            
+            # IP 주소가 프린터/복사기인지 확인
+            if self._is_printer(ip_address):
+                print(f"IP 주소 {ip_address}에서 프린터/복사기를 발견했습니다.")
+                device_info = self._get_basic_device_info(ip_address)
+                print(f"장치 정보: {device_info}")
+                return device_info
+            
+            print(f"IP 주소 {ip_address}에서 프린터/복사기를 찾을 수 없습니다.")
+            return None
+        except socket.error:
+            print(f"유효하지 않은 IP 주소 형식: {ip_address}")
+            return None
+        except Exception as e:
+            print(f"IP 주소 {ip_address} 스캔 중 오류 발생: {str(e)}")
+            return None
     
     def _is_printer(self, ip):
         """
@@ -102,34 +103,90 @@ class NetworkScanner:
         Returns:
             bool: 프린터/복사기이면 True, 아니면 False
         """
-        # 1. 포트 확인
-        for port in self.printer_ports:
-            if port in self.nm[ip].get('tcp', {}):
-                # 2. SNMP 확인
-                system_desc = self._get_snmp_value(ip, self.oids['system_description'])
-                if system_desc:
-                    system_desc = system_desc.lower()
-                    # 제조사 이름이 시스템 설명에 포함되어 있는지 확인
-                    for manufacturer in self.printer_manufacturers:
-                        if manufacturer in system_desc:
-                            return True
-                
-                # 3. HTTP 확인 (웹 인터페이스)
-                if 80 in self.nm[ip].get('tcp', {}) or 443 in self.nm[ip].get('tcp', {}):
-                    try:
-                        protocol = 'https' if 443 in self.nm[ip].get('tcp', {}) else 'http'
-                        response = requests.get(f"{protocol}://{ip}", timeout=2)
-                        page_content = response.text.lower()
-                        
-                        # 프린터 관련 키워드 확인
-                        printer_keywords = ['printer', 'copier', 'scanner', 'mfp', 'multifunction']
-                        for keyword in printer_keywords:
-                            if keyword in page_content:
-                                return True
-                    except:
-                        pass
+        print(f"IP {ip} 확인 중...")
         
+        # 1. 포트 확인
+        open_ports = []
+        for port in self.printer_ports:
+            if self._check_port(ip, port):
+                open_ports.append(port)
+                print(f"IP {ip}의 포트 {port}가 열려 있습니다.")
+        
+        if not open_ports:
+            print(f"IP {ip}에서 열린 프린터 관련 포트를 찾을 수 없습니다.")
+            return False
+        
+        # 2. SNMP 확인
+        system_desc = self._get_snmp_value(ip, self.oids['system_description'])
+        if system_desc:
+            print(f"IP {ip}의 SNMP 시스템 설명: {system_desc}")
+            system_desc = system_desc.lower()
+            
+            # 제조사 이름이 시스템 설명에 포함되어 있는지 확인
+            for manufacturer in self.printer_manufacturers:
+                if manufacturer in system_desc:
+                    print(f"IP {ip}는 {manufacturer} 제조사의 프린터/복사기입니다.")
+                    return True
+        else:
+            print(f"IP {ip}에서 SNMP 정보를 가져올 수 없습니다.")
+        
+        # 3. HTTP 확인 (웹 인터페이스)
+        if 80 in open_ports or 443 in open_ports:
+            try:
+                protocol = 'https' if 443 in open_ports else 'http'
+                print(f"IP {ip}의 웹 인터페이스 확인 중 ({protocol})...")
+                response = requests.get(f"{protocol}://{ip}", timeout=2, verify=False)
+                page_content = response.text.lower()
+                
+                # 프린터 관련 키워드 확인
+                printer_keywords = ['printer', 'copier', 'scanner', 'mfp', 'multifunction', '프린터', '복사기', '스캐너', '복합기']
+                for keyword in printer_keywords:
+                    if keyword in page_content:
+                        print(f"IP {ip}의 웹 페이지에서 '{keyword}' 키워드를 발견했습니다.")
+                        return True
+                
+                print(f"IP {ip}의 웹 페이지에서 프린터 관련 키워드를 찾을 수 없습니다.")
+            except requests.exceptions.RequestException as e:
+                print(f"HTTP 요청 실패 ({ip}): {str(e)}")
+            except Exception as e:
+                print(f"HTTP 확인 중 예외 발생 ({ip}): {str(e)}")
+        
+        # 4. 프린터 포트가 열려 있으면 프린터로 간주 (더 관대한 검사)
+        if 9100 in open_ports or 515 in open_ports or 631 in open_ports:
+            print(f"IP {ip}는 프린터 관련 포트({open_ports})가 열려 있어 프린터/복사기로 간주합니다.")
+            return True
+        
+        print(f"IP {ip}는 프린터/복사기가 아닌 것으로 판단됩니다.")
         return False
+    
+    def _check_port(self, ip, port):
+        """
+        IP 주소의 특정 포트가 열려있는지 확인
+        
+        Args:
+            ip (str): 확인할 IP 주소
+            port (int): 확인할 포트 번호
+            
+        Returns:
+            bool: 포트가 열려있으면 True, 아니면 False
+        """
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(3)  # 3초 타임아웃 (더 긴 시간으로 설정)
+        result = False
+        try:
+            print(f"IP {ip}의 포트 {port} 연결 시도 중...")
+            result = sock.connect_ex((ip, port)) == 0
+            if result:
+                print(f"IP {ip}의 포트 {port}가 열려 있습니다.")
+            else:
+                print(f"IP {ip}의 포트 {port}가 닫혀 있습니다.")
+        except socket.error as e:
+            print(f"IP {ip}의 포트 {port} 확인 중 소켓 오류: {str(e)}")
+        except Exception as e:
+            print(f"IP {ip}의 포트 {port} 확인 중 예외 발생: {str(e)}")
+        finally:
+            sock.close()
+        return result
     
     def _get_basic_device_info(self, ip):
         """
@@ -218,77 +275,29 @@ class NetworkScanner:
             'yellow': {'level': 0, 'max': 100, 'percent': 0}
         }
         
-        # 블랙 토너
-        black_level = self._get_snmp_value(ip, self.oids['black_toner_level'])
-        black_max = self._get_snmp_value(ip, self.oids['black_toner_max'])
+        # 토너 색상별 처리
+        toner_colors = ['black', 'cyan', 'magenta', 'yellow']
         
-        if black_level and black_max:
-            try:
-                black_level = int(black_level)
-                black_max = int(black_max)
-                black_percent = int((black_level / black_max) * 100) if black_max > 0 else 0
-                
-                toner_info['black'] = {
-                    'level': black_level,
-                    'max': black_max,
-                    'percent': black_percent
-                }
-            except:
-                pass
-        
-        # 컬러 토너 (시안)
-        cyan_level = self._get_snmp_value(ip, self.oids['cyan_toner_level'])
-        cyan_max = self._get_snmp_value(ip, self.oids['cyan_toner_max'])
-        
-        if cyan_level and cyan_max:
-            try:
-                cyan_level = int(cyan_level)
-                cyan_max = int(cyan_max)
-                cyan_percent = int((cyan_level / cyan_max) * 100) if cyan_max > 0 else 0
-                
-                toner_info['cyan'] = {
-                    'level': cyan_level,
-                    'max': cyan_max,
-                    'percent': cyan_percent
-                }
-            except:
-                pass
-        
-        # 컬러 토너 (마젠타)
-        magenta_level = self._get_snmp_value(ip, self.oids['magenta_toner_level'])
-        magenta_max = self._get_snmp_value(ip, self.oids['magenta_toner_max'])
-        
-        if magenta_level and magenta_max:
-            try:
-                magenta_level = int(magenta_level)
-                magenta_max = int(magenta_max)
-                magenta_percent = int((magenta_level / magenta_max) * 100) if magenta_max > 0 else 0
-                
-                toner_info['magenta'] = {
-                    'level': magenta_level,
-                    'max': magenta_max,
-                    'percent': magenta_percent
-                }
-            except:
-                pass
-        
-        # 컬러 토너 (옐로우)
-        yellow_level = self._get_snmp_value(ip, self.oids['yellow_toner_level'])
-        yellow_max = self._get_snmp_value(ip, self.oids['yellow_toner_max'])
-        
-        if yellow_level and yellow_max:
-            try:
-                yellow_level = int(yellow_level)
-                yellow_max = int(yellow_max)
-                yellow_percent = int((yellow_level / yellow_max) * 100) if yellow_max > 0 else 0
-                
-                toner_info['yellow'] = {
-                    'level': yellow_level,
-                    'max': yellow_max,
-                    'percent': yellow_percent
-                }
-            except:
-                pass
+        for color in toner_colors:
+            level_oid = self.oids[f'{color}_toner_level']
+            max_oid = self.oids[f'{color}_toner_max']
+            
+            level = self._get_snmp_value(ip, level_oid)
+            max_value = self._get_snmp_value(ip, max_oid)
+            
+            if level and max_value:
+                try:
+                    level = int(level)
+                    max_value = int(max_value)
+                    percent = int((level / max_value) * 100) if max_value > 0 else 0
+                    
+                    toner_info[color] = {
+                        'level': level,
+                        'max': max_value,
+                        'percent': percent
+                    }
+                except (ValueError, TypeError) as e:
+                    print(f"{color} 토너 정보 변환 중 오류 ({ip}): {str(e)}")
         
         return toner_info
     
@@ -304,21 +313,32 @@ class NetworkScanner:
             str: SNMP 값 (실패 시 None)
         """
         try:
-            error_indication, error_status, error_index, var_binds = next(
-                getCmd(
-                    SnmpEngine(),
-                    CommunityData(self.snmp_community, mpModel=self.snmp_version-1),
-                    UdpTransportTarget((ip, 161), timeout=2, retries=1),
-                    ContextData(),
-                    ObjectType(ObjectIdentity(oid))
-                )
+            print(f"IP {ip}에서 SNMP OID {oid} 값 요청 중...")
+            # puresnmp를 사용하여 SNMP 값 가져오기
+            result = puresnmp.get(
+                ip,
+                self.snmp_community,
+                oid,
+                timeout=2,
+                version=self.snmp_version
             )
             
-            if error_indication or error_status:
-                return None
+            # 결과가 bytes 타입이면 디코딩
+            if isinstance(result, bytes):
+                try:
+                    decoded = result.decode('utf-8')
+                    print(f"SNMP 값 (UTF-8): {decoded}")
+                    return decoded
+                except UnicodeDecodeError:
+                    hex_value = result.hex()
+                    print(f"SNMP 값 (HEX): {hex_value}")
+                    return hex_value
             
-            return str(var_binds[0][1])
-        except:
+            print(f"SNMP 값: {result}")
+            return str(result)
+        except Exception as e:
+            # 디버깅을 위해 예외 정보 출력
+            print(f"SNMP 값 가져오기 실패 ({ip}, {oid}): {str(e)}")
             return None
     
     def _format_uptime(self, seconds):
